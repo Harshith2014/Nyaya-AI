@@ -6,28 +6,32 @@ Scores model answers on four legal-domain dimensions (each 1-5):
   helpfulness     : usefulness / clarity / actionability
   legal_accuracy  : correct interpretation of Indian law / statutes
 
-Uses Ollama llama3.2 locally (same stack as ClauseIQ eval/llm_judge.py).
+Uses Anthropic API (claude-sonnet-4-6) as the judge backend.
 Lenient JSON parsing with regex fallback per dimension.
 
 Usage:
     python evals/llm_judge.py --results evals/ft_results.json
                               [--out evals/judge_results.json]
-                              [--model llama3.2]
+                              [--model claude-sonnet-4-6]
 """
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import json
+import os
 import re
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import anthropic
+
 ROOT = Path(__file__).parent.parent
 
-OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_MODEL   = "llama3.2"
+DEFAULT_MODEL = "claude-sonnet-4-6"
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -97,23 +101,18 @@ JSON:"""
 
 
 # ---------------------------------------------------------------------------
-# LLM call (Ollama)
+# LLM call (Anthropic API)
 # ---------------------------------------------------------------------------
 
-def _call_ollama(prompt: str, model: str = DEFAULT_MODEL) -> str:
-    payload = json.dumps({
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.0, "num_predict": 600},
-    }).encode()
-    req = urllib.request.Request(
-        f"{OLLAMA_BASE_URL}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
+def _call_anthropic(prompt: str, model: str = DEFAULT_MODEL) -> str:
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+    msg = client.messages.create(
+        model=model,
+        max_tokens=600,
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}],
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        return json.loads(resp.read())["response"].strip()
+    return msg.content[0].text.strip()
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +149,7 @@ def judge(
         answer=prediction[:600],
     )
     try:
-        raw = _call_ollama(prompt, model=model)
+        raw = _call_anthropic(prompt, model=model)
         start = raw.find("{")
         end   = raw.rfind("}") + 1
         if start != -1 and end > start:
