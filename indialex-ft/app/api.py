@@ -63,17 +63,28 @@ def _load_model(model_path: str):
 async def lifespan(app: FastAPI):
     cfg = yaml.safe_load(CONFIG_PATH.read_text())
     output_dir = cfg["output"]["output_dir"]
-    merged_path = str(Path(output_dir) / "merged")
+    base_name  = cfg["model"]["model_name"]
+    ft_path    = str(Path(output_dir) / "merged")
 
-    if not Path(merged_path).exists():
-        log.warning("Merged model not found at %s — falling back to base model.", merged_path)
-        merged_path = cfg["model"]["model_name"]
+    # Always load base model
+    _state["base_model"], _state["base_tokenizer"] = _load_model(base_name)
+    _state["base_model_path"] = base_name
+    log.info("Base model ready: %s", base_name)
 
-    model, tokenizer = _load_model(merged_path)
-    _state["model"] = model
-    _state["tokenizer"] = tokenizer
-    _state["model_path"] = merged_path
-    log.info("Model ready: %s", merged_path)
+    # Load fine-tuned model if available
+    if Path(ft_path).exists():
+        _state["ft_model"], _state["ft_tokenizer"] = _load_model(ft_path)
+        _state["ft_model_path"] = ft_path
+        log.info("Fine-tuned model ready: %s", ft_path)
+    else:
+        log.warning("Merged model not found at %s — FT model unavailable.", ft_path)
+        _state["ft_model"] = _state["ft_tokenizer"] = _state["ft_model_path"] = None
+
+    # /generate backward-compat: prefer FT, fall back to base
+    _state["model"]      = _state["ft_model"]      or _state["base_model"]
+    _state["tokenizer"]  = _state["ft_tokenizer"]  or _state["base_tokenizer"]
+    _state["model_path"] = _state["ft_model_path"] or _state["base_model_path"]
+
     yield
     _state.clear()
 
