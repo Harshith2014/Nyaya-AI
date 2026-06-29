@@ -9,8 +9,15 @@ Usage:
 """
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv()
+
+import json
 import logging
+import threading
+import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +29,9 @@ log = logging.getLogger("uvicorn.error")
 
 ROOT = Path(__file__).parent.parent
 CONFIG_PATH = ROOT / "configs" / "train_config.yaml"
+
+_feedback_lock = threading.Lock()
+FEEDBACK_LOG = ROOT / "evals" / "feedback_log.jsonl"
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +65,6 @@ async def lifespan(app: FastAPI):
     output_dir = cfg["output"]["output_dir"]
     merged_path = str(Path(output_dir) / "merged")
 
-    # Fall back to base model if merged model doesn't exist yet
     if not Path(merged_path).exists():
         log.warning("Merged model not found at %s — falling back to base model.", merged_path)
         merged_path = cfg["model"]["model_name"]
@@ -70,6 +79,35 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="IndiaLex-FT Inference API", version="1.0.0", lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Inference helper
+# ---------------------------------------------------------------------------
+
+def _run_inference(model, tokenizer, instruction: str, inp: str, max_new_tokens: int) -> str:
+    import torch
+
+    inp = inp.strip()
+    if inp:
+        prompt = (
+            f"### Instruction:\n{instruction}\n\n"
+            f"### Input:\n{inp}\n\n"
+            f"### Response:\n"
+        )
+    else:
+        prompt = f"### Instruction:\n{instruction}\n\n### Response:\n"
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    generated = out[0][inputs["input_ids"].shape[1]:]
+    return tokenizer.decode(generated, skip_special_tokens=True).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -103,28 +141,8 @@ def generate(req: GenerateRequest):
     if model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    inp = (req.input or "").strip()
-    if inp:
-        prompt = (
-            f"### Instruction:\n{req.instruction}\n\n"
-            f"### Input:\n{inp}\n\n"
-            f"### Response:\n"
-        )
-    else:
-        prompt = f"### Instruction:\n{req.instruction}\n\n### Response:\n"
-
     try:
-        import torch
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        with torch.no_grad():
-            out = model.generate(
-                **inputs,
-                max_new_tokens=req.max_new_tokens,
-                do_sample=False,
-                pad_token_id=tokenizer.eos_token_id,
-            )
-        generated = out[0][inputs["input_ids"].shape[1]:]
-        text = tokenizer.decode(generated, skip_special_tokens=True).strip()
+        text = _run_inference(model, tokenizer, req.instruction, req.input or "", req.max_new_tokens)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
