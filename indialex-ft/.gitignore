@@ -1,0 +1,32 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data & model artifacts
+data/splits/
+data/raw/synthetic.json
+outputs/
+*.pt
+*.bin
+*.safetensors
+
+# Logs & eval outputs
+logs/
+evals/judge_results.json
+evals/feedback_log.jsonl
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
