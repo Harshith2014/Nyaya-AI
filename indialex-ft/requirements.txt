@@ -1,3 +1,6 @@
+anthropic
+groq
+python-dotenv
 transformers
 trl
 peft
