@@ -3,6 +3,7 @@
 Endpoints:
     POST /generate   — {instruction, input} → {output, model}
     POST /compare    — {instruction, input} → base vs FT outputs with latencies
+    POST /feedback   — {question, answer, rating} → appends to feedback_log.jsonl
     GET  /health     — liveness check
 
 Usage:
@@ -152,6 +153,16 @@ class CompareResponse(BaseModel):
     ft_latency_s: Optional[float]
 
 
+class FeedbackRequest(BaseModel):
+    question: str
+    answer: str
+    rating: int   # 1-5
+
+
+class FeedbackResponse(BaseModel):
+    status: str
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -211,3 +222,20 @@ def compare(req: CompareRequest):
         ft_model=_state.get("ft_model_path"),
         ft_latency_s=ft_lat,
     )
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+def feedback(req: FeedbackRequest):
+    if not 1 <= req.rating <= 5:
+        raise HTTPException(status_code=422, detail="rating must be 1-5")
+    record = {
+        "question":  req.question,
+        "answer":    req.answer,
+        "rating":    req.rating,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    FEEDBACK_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with _feedback_lock:
+        with FEEDBACK_LOG.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return FeedbackResponse(status="logged")
