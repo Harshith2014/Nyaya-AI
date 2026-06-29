@@ -53,22 +53,14 @@ _SYNTHETIC_TOPICS = [
     "Income tax slabs and rates for FY 2024-25 (AY 2025-26)",
 ]
 
-_BATCH_SIZE  = 10   # pairs per API call
+_BATCH_SIZE  = 10   # pairs per API call (small = reliable JSON + avoids token limits)
 _ROUNDS      = 5    # calls per topic  → 10 topics × 5 rounds × 10 pairs = 500 total
 _TOTAL_PAIRS = 500
 
 
 # ---------------------------------------------------------------------------
-# Synthetic data generation (Groq) — with resume + incremental saves
+# Synthetic data generation (Groq)
 # ---------------------------------------------------------------------------
-
-def _save(pairs: list[dict], out_path: Path) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps(pairs, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
 
 def _parse_retry_after(error_msg: str) -> float:
     """Extract seconds to wait from a Groq 429 error message.
@@ -84,15 +76,24 @@ def _parse_retry_after(error_msg: str) -> float:
     return 65.0
 
 
+def _save(pairs: list[dict], out_path: Path) -> None:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps(pairs, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def generate_synthetic_data(out_path: Path, total: int = _TOTAL_PAIRS) -> int:
     """Generate synthetic Indian tax/legal Q&A pairs via the Groq API.
 
     Resume-aware: loads any pairs already saved in *out_path* and only
-    generates what is still missing. Writes the file after every successful
+    generates what is still missing.  Writes the file after every successful
     API call so progress is never lost.
 
-    On a 429 the error message contains the exact retry delay; the function
-    sleeps for that duration and retries the same call once before moving on.
+    On a 429 (token-per-day limit) the error message contains the exact
+    retry delay; the function sleeps for that duration and retries the same
+    call once before moving on.
 
     Environment variable required:
         GROQ_API_KEY  — your Groq API key
@@ -222,6 +223,7 @@ def generate_synthetic_data(out_path: Path, total: int = _TOTAL_PAIRS) -> int:
                         log.warning("Call %d attempt %d — failed: %s", call_num, attempt, exc)
                         break
 
+            # Brief pause between successful calls to stay under per-minute limits
             if call_num < total_calls and len(all_pairs) < total:
                 time.sleep(3)
 
@@ -365,19 +367,16 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # --- Synthetic data generation (runs before load_raw) ---
     if args.synthetic:
         synthetic_path = Path(args.synthetic_out)
-        if synthetic_path.exists():
-            log.info(
-                "synthetic.json already exists at %s — skipping generation. "
-                "Delete the file and re-run with --synthetic to regenerate.",
-                synthetic_path,
-            )
-        else:
-            n = generate_synthetic_data(synthetic_path)
-            if n == 0:
-                log.warning("Synthetic generation produced no pairs — continuing with existing data.")
+        # Always call generate — it resumes from existing pairs automatically
+        # and exits early if the target is already met.
+        n = generate_synthetic_data(synthetic_path)
+        if n == 0:
+            log.warning("Synthetic generation produced no pairs — continuing with existing data.")
 
+    # --- Load, clean, split ---
     records = load_raw(raw_dir)
     if not records:
         log.error("No valid records found in %s — add .jsonl / .json / .csv files first.", raw_dir)
