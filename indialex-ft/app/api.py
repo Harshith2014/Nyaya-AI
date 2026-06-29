@@ -2,6 +2,7 @@
 
 Endpoints:
     POST /generate   — {instruction, input} → {output, model}
+    POST /compare    — {instruction, input} → base vs FT outputs with latencies
     GET  /health     — liveness check
 
 Usage:
@@ -136,6 +137,21 @@ class GenerateResponse(BaseModel):
     model: str
 
 
+class CompareRequest(BaseModel):
+    instruction: str
+    input: Optional[str] = ""
+    max_new_tokens: Optional[int] = 256
+
+
+class CompareResponse(BaseModel):
+    base_output: str
+    base_model: str
+    base_latency_s: float
+    ft_output: Optional[str]
+    ft_model: Optional[str]
+    ft_latency_s: Optional[float]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -158,3 +174,40 @@ def generate(req: GenerateRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
     return GenerateResponse(output=text, model=_state["model_path"])
+
+
+@app.post("/compare", response_model=CompareResponse)
+def compare(req: CompareRequest):
+    if _state.get("base_model") is None:
+        raise HTTPException(status_code=503, detail="Models not loaded")
+
+    try:
+        t0 = time.perf_counter()
+        base_out = _run_inference(
+            _state["base_model"], _state["base_tokenizer"],
+            req.instruction, req.input or "", req.max_new_tokens,
+        )
+        base_lat = round(time.perf_counter() - t0, 3)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Base model error: {exc}")
+
+    ft_out = ft_lat = None
+    if _state.get("ft_model"):
+        try:
+            t0 = time.perf_counter()
+            ft_out = _run_inference(
+                _state["ft_model"], _state["ft_tokenizer"],
+                req.instruction, req.input or "", req.max_new_tokens,
+            )
+            ft_lat = round(time.perf_counter() - t0, 3)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"FT model error: {exc}")
+
+    return CompareResponse(
+        base_output=base_out,
+        base_model=_state["base_model_path"],
+        base_latency_s=base_lat,
+        ft_output=ft_out,
+        ft_model=_state.get("ft_model_path"),
+        ft_latency_s=ft_lat,
+    )
