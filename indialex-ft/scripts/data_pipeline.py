@@ -323,6 +323,73 @@ def load_raw(raw_dir: Path) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Deduplication
+# ---------------------------------------------------------------------------
+
+def deduplicate(records: list[dict], threshold: float = 0.92) -> list[dict]:
+    """Remove near-duplicate records using sentence-transformer cosine similarity.
+
+    Embeds each record as ``instruction + " " + output`` with
+    all-MiniLM-L6-v2, then greedily keeps the first occurrence of any
+    cluster where pairwise cosine similarity exceeds *threshold*.
+
+    Args:
+        records:   cleaned records from load_raw()
+        threshold: cosine similarity cutoff — pairs above this are duplicates
+
+    Returns:
+        Deduplicated list (order preserved, first occurrence kept).
+    """
+    if not records:
+        return records
+
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        log.warning(
+            "sentence-transformers not installed — skipping deduplication. "
+            "Run: pip install sentence-transformers"
+        )
+        return records
+
+    import numpy as np
+
+    log.info("Loading all-MiniLM-L6-v2 for deduplication …")
+    model = SentenceTransformer("all-MiniLM-L6-v2")
+
+    texts = [r["instruction"] + " " + r["output"] for r in records]
+    log.info("Embedding %d records …", len(texts))
+    embeddings = model.encode(
+        texts,
+        batch_size=64,
+        show_progress_bar=True,
+        normalize_embeddings=True,   # L2-normalised → dot product == cosine sim
+    )
+
+    kept_indices: list[int] = []
+    kept_vecs: list = []          # grows as we accept records
+
+    for i, emb in enumerate(embeddings):
+        if not kept_vecs:
+            kept_indices.append(i)
+            kept_vecs.append(emb)
+            continue
+
+        # Cosine similarities against every already-kept embedding
+        sims = np.stack(kept_vecs) @ emb   # shape (K,)
+        if float(sims.max()) <= threshold:
+            kept_indices.append(i)
+            kept_vecs.append(emb)
+
+    removed = len(records) - len(kept_indices)
+    print(f"Deduplication: {removed} duplicates removed, {len(kept_indices)} records kept "
+          f"(threshold={threshold}).")
+    log.info("Deduplication complete — removed %d, kept %d.", removed, len(kept_indices))
+
+    return [records[i] for i in kept_indices]
+
+
+# ---------------------------------------------------------------------------
 # Split
 # ---------------------------------------------------------------------------
 
@@ -361,6 +428,13 @@ def main():
         default=str(ROOT / "data" / "raw" / "synthetic.json"),
         help="Destination path for the generated synthetic data (default: data/raw/synthetic.json)",
     )
+    parser.add_argument(
+        "--dedup_threshold",
+        type=float,
+        default=0.92,
+        help="Cosine similarity cutoff for deduplication (default: 0.92). "
+             "Pairs above this value are considered duplicates.",
+    )
     args = parser.parse_args()
 
     raw_dir = Path(args.raw_dir)
@@ -376,11 +450,20 @@ def main():
         if n == 0:
             log.warning("Synthetic generation produced no pairs — continuing with existing data.")
 
-    # --- Load, clean, split ---
+    # --- Load, clean, deduplicate, split ---
     records = load_raw(raw_dir)
     if not records:
         log.error("No valid records found in %s — add .jsonl / .json / .csv files first.", raw_dir)
         return
+
+    records = deduplicate(records, threshold=args.dedup_threshold)
+
+    # Save deduplicated records before splitting so the clean set is inspectable
+    deduped_path = out_dir / "deduped.json"
+    deduped_path.write_text(
+        json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    log.info("Deduplicated dataset saved to %s (%d records)", deduped_path, len(records))
 
     splits = split_dataset(records)
     for split, ds in splits.items():
