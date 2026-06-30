@@ -1,6 +1,7 @@
 anthropic
 groq
 python-dotenv
+sentence-transformers
 transformers
 trl
 peft
