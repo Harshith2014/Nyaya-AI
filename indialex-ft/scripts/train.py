@@ -66,7 +66,7 @@ def main():
     max_seq_len      = cfg["training"]["max_seq_length"]
     warmup_ratio     = cfg["training"]["warmup_ratio"]
     weight_decay     = cfg["training"]["weight_decay"]
-    output_dir       = cfg["output"]["output_dir"]
+    output_dir       = str((ROOT / cfg["output"]["output_dir"]).resolve())
     wandb_project    = cfg["logging"]["wandb_project"]
 
     os.environ.setdefault("WANDB_PROJECT", wandb_project)
@@ -163,7 +163,7 @@ def main():
     trainer.train()
 
     # --- Save adapter ---
-    adapter_path = Path(output_dir) / "adapter"
+    adapter_path = (ROOT / output_dir / "adapter").resolve()
     adapter_path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(adapter_path))
     tokenizer.save_pretrained(str(adapter_path))
@@ -176,7 +176,7 @@ def main():
     base = AMCL.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
     merged = PeftModel.from_pretrained(base, str(adapter_path))
     merged = merged.merge_and_unload()
-    merged_path = Path(output_dir) / "merged"
+    merged_path = (ROOT / output_dir / "merged").resolve()
     merged.save_pretrained(str(merged_path))
     tokenizer.save_pretrained(str(merged_path))
     log.info("Merged model saved to %s", merged_path)

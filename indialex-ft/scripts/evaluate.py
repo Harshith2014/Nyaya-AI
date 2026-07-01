@@ -87,7 +87,7 @@ def main():
 
     cfg = yaml.safe_load(Path(args.config).read_text())
     output_dir = cfg["output"]["output_dir"]
-    merged_path = str(Path(output_dir) / "merged")
+    merged_path = str((ROOT / output_dir / "merged").resolve())
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
