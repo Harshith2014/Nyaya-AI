@@ -70,6 +70,7 @@ def main():
     wandb_project    = cfg["logging"]["wandb_project"]
 
     os.environ.setdefault("WANDB_PROJECT", wandb_project)
+    report_to = "wandb" if os.environ.get("WANDB_API_KEY") else "none"
 
     import torch
     from datasets import load_from_disk
@@ -78,9 +79,8 @@ def main():
         AutoModelForCausalLM,
         AutoTokenizer,
         BitsAndBytesConfig,
-        TrainingArguments,
     )
-    from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
+    from trl import SFTConfig, SFTTrainer
 
     # --- 4-bit quantisation config ---
     bnb_cfg = BitsAndBytesConfig(
@@ -129,8 +129,8 @@ def main():
     train_ds = dataset["train"].map(_add_text, batched=True, remove_columns=dataset["train"].column_names)
     val_ds   = dataset["val"].map(_add_text,   batched=True, remove_columns=dataset["val"].column_names)
 
-    # --- Training args ---
-    training_args = TrainingArguments(
+    # --- Training args (SFTConfig inherits TrainingArguments) ---
+    training_args = SFTConfig(
         output_dir=output_dir,
         num_train_epochs=num_epochs,
         per_device_train_batch_size=batch_size,
@@ -144,8 +144,11 @@ def main():
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        report_to="wandb",
+        report_to=report_to,
         run_name="indialex-ft",
+        max_seq_length=max_seq_len,
+        dataset_text_field="text",
+        packing=False,
     )
 
     trainer = SFTTrainer(
@@ -153,10 +156,7 @@ def main():
         args=training_args,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        tokenizer=tokenizer,
-        dataset_text_field="text",
-        max_seq_length=max_seq_len,
-        packing=False,
+        processing_class=tokenizer,
     )
 
     log.info("Starting training …")
