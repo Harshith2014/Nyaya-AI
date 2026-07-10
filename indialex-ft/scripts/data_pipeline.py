@@ -430,6 +430,12 @@ def main():
         help="Destination path for the generated synthetic data (default: data/raw/synthetic.json)",
     )
     parser.add_argument(
+        "--total",
+        type=int,
+        default=_TOTAL_PAIRS,
+        help=f"Number of synthetic pairs to generate (default: {_TOTAL_PAIRS})",
+    )
+    parser.add_argument(
         "--dedup_threshold",
         type=float,
         default=0.92,
@@ -447,7 +453,7 @@ def main():
         synthetic_path = Path(args.synthetic_out)
         # Always call generate — it resumes from existing pairs automatically
         # and exits early if the target is already met.
-        n = generate_synthetic_data(synthetic_path)
+        n = generate_synthetic_data(synthetic_path, total=args.total)
         if n == 0:
             log.error("Synthetic generation produced no pairs — check GROQ_API_KEY and network.")
             sys.exit(1)
