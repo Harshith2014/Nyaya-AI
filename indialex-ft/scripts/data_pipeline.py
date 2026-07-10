@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re
+import sys
 import time
 import unicodedata
 from pathlib import Path
@@ -448,13 +449,14 @@ def main():
         # and exits early if the target is already met.
         n = generate_synthetic_data(synthetic_path)
         if n == 0:
-            log.warning("Synthetic generation produced no pairs — continuing with existing data.")
+            log.error("Synthetic generation produced no pairs — check GROQ_API_KEY and network.")
+            sys.exit(1)
 
     # --- Load, clean, deduplicate, split ---
     records = load_raw(raw_dir)
     if not records:
         log.error("No valid records found in %s — add .jsonl / .json / .csv files first.", raw_dir)
-        return
+        sys.exit(1)
 
     records = deduplicate(records, threshold=args.dedup_threshold)
 

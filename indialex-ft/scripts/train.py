@@ -53,7 +53,11 @@ def main():
     parser.add_argument("--splits_dir", default=str(ROOT / "data" / "splits"))
     args = parser.parse_args()
 
-    cfg = yaml.safe_load(Path(args.config).read_text())
+    config_path = Path(args.config)
+    if not config_path.exists():
+        log.error("Config file not found: %s", config_path)
+        raise SystemExit(1)
+    cfg = yaml.safe_load(config_path.read_text())
 
     model_name = cfg["model"]["model_name"]
     lora_r           = cfg["lora"]["lora_r"]

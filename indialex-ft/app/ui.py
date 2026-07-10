@@ -11,12 +11,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import os
+
 import streamlit as st
 
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-API_URL = "http://localhost:8000"
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -43,11 +45,15 @@ with st.sidebar:
 
     st.divider()
     st.markdown("**Model path** (direct inference only)")
+    _outputs_root = ROOT / "outputs"
     model_path_input = st.text_input(
         "Model path",
-        value=str(ROOT / "outputs" / "indialex-ft" / "merged"),
-        help="Path to the merged fine-tuned model directory",
+        value=str(_outputs_root / "indialex-ft" / "merged"),
+        help=f"Path to the merged fine-tuned model directory (must be under {_outputs_root})",
     )
+    if not Path(model_path_input).resolve().is_relative_to(_outputs_root.resolve()):
+        st.error("Model path must be inside the outputs/ directory.")
+        model_path_input = str(_outputs_root / "indialex-ft" / "merged")
 
 # ---------------------------------------------------------------------------
 # Inference helpers
